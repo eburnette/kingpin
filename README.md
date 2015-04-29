@@ -27,7 +27,7 @@ $ chat post --server=chat.server.com:8080 --image=~/Downloads/owls.jpg pics
 
 ## Versions
 
-Kingpin uses [gopkg.in](https://gopkg.in/alecthomas/kingpin.v1) for versioning.
+Kingpin uses [gopkg.in](https://gopkg.in/alecthomas/kingpin.v2) for versioning.
 
 ### [V1](https://gopkg.in/alecthomas/kingpin.v1) is the current stable version
 

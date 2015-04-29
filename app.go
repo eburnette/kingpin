@@ -48,8 +48,7 @@ type Application struct {
 	*argGroup
 	*cmdGroup
 	initialized bool
-	Name        string
-	Help        string
+	Model       *ApplicationModel
 	action      Action
 	validator   ApplicationValidator
 	terminate   func(status int) // See Terminate()
@@ -60,12 +59,23 @@ func New(name, help string) *Application {
 	a := &Application{
 		flagGroup: newFlagGroup(),
 		argGroup:  newArgGroup(),
-		Name:      name,
-		Help:      help,
+		Model: &ApplicationModel{
+			Name: name,
+			Help: help,
+		},
 		terminate: func(status int) { os.Exit(status) },
 	}
 	a.cmdGroup = newCmdGroup(a)
+	a.Model.FlagGroupModel = a.flagGroup.model
+	a.Model.CmdGroupModel = a.cmdGroup.model
+	a.Model.ArgGroupModel = a.argGroup.model
 	a.Flag("help", "Show help.").Bool()
+	return a
+}
+
+// Help sets the primary application description.
+func (a *Application) Help(help string) *Application {
+	a.Model.Help = help
 	return a
 }
 
@@ -103,7 +113,7 @@ func (a *Application) Parse(args []string) (command string, err error) {
 	if err != nil {
 		if a.hasHelp(args) {
 			a.Errorf(os.Stdout, "%s", err)
-			a.usageForContext(os.Stdout, context)
+			a.UsageTemplate(context, os.Stdout, 2, UsageTemplate)
 			a.terminate(1)
 		}
 		return "", err
@@ -126,8 +136,8 @@ func (a *Application) hasHelp(args []string) bool {
 
 func (a *Application) maybeHelp(context *ParseContext) {
 	for _, element := range context.Elements {
-		if flag, ok := element.Clause.(*FlagClause); ok && flag.name == "help" {
-			a.usageForContext(os.Stdout, context)
+		if flag, ok := element.Clause.(*FlagClause); ok && flag.Model.Name == "help" {
+			a.UsageTemplate(context, os.Stdout, 2, UsageTemplate)
 			a.terminate(1)
 		}
 	}
@@ -150,7 +160,7 @@ func (a *Application) findCommandFromContext(context *ParseContext) string {
 	commands := []string{}
 	for _, element := range context.Elements {
 		if c, ok := element.Clause.(*CmdClause); ok {
-			commands = append(commands, c.name)
+			commands = append(commands, c.Model.Name)
 		}
 	}
 	return strings.Join(commands, " ")
@@ -218,13 +228,13 @@ func checkDuplicateFlags(current *CmdClause, flagGroups []*flagGroup) error {
 	// Check for duplicates.
 	for _, flags := range flagGroups {
 		for _, flag := range current.flagOrder {
-			if flag.shorthand != 0 {
-				if _, ok := flags.short[string(flag.shorthand)]; ok {
-					return fmt.Errorf("duplicate short flag -%c", flag.shorthand)
+			if flag.Model.Short != 0 {
+				if _, ok := flags.short[string(flag.Model.Short)]; ok {
+					return fmt.Errorf("duplicate short flag -%c", flag.Model.Short)
 				}
 			}
-			if _, ok := flags.long[flag.name]; ok {
-				return fmt.Errorf("duplicate long flag --%s", flag.name)
+			if _, ok := flags.long[flag.Model.Name]; ok {
+				return fmt.Errorf("duplicate long flag --%s", flag.Model.Name)
 			}
 		}
 	}
@@ -283,27 +293,27 @@ func (a *Application) setDefaults(context *ParseContext) error {
 	flagElements := map[string]*ParseElement{}
 	for _, element := range context.Elements {
 		if flag, ok := element.Clause.(*FlagClause); ok {
-			flagElements[flag.name] = element
+			flagElements[flag.Model.Name] = element
 		}
 	}
 
 	argElements := map[string]*ParseElement{}
 	for _, element := range context.Elements {
 		if arg, ok := element.Clause.(*ArgClause); ok {
-			argElements[arg.name] = element
+			argElements[arg.Model.Name] = element
 		}
 	}
 
 	// Check required flags and set defaults.
 	for _, flag := range context.flags.long {
-		if flagElements[flag.name] == nil {
+		if flagElements[flag.Model.Name] == nil {
 			// Check required flags were provided.
 			if flag.needsValue() {
-				return fmt.Errorf("required flag --%s not provided", flag.name)
+				return fmt.Errorf("required flag --%s not provided", flag.Model.Name)
 			}
 			// Set defaults, if any.
-			if flag.defaultValue != "" {
-				if err := flag.value.Set(flag.defaultValue); err != nil {
+			if flag.Model.Default != "" {
+				if err := flag.value.Set(flag.Model.Default); err != nil {
 					return err
 				}
 			}
@@ -311,13 +321,13 @@ func (a *Application) setDefaults(context *ParseContext) error {
 	}
 
 	for _, arg := range context.arguments.args {
-		if argElements[arg.name] == nil {
-			if arg.required {
-				return fmt.Errorf("required argument '%s' not provided", arg.name)
+		if argElements[arg.Model.Name] == nil {
+			if arg.Model.Required {
+				return fmt.Errorf("required argument '%s' not provided", arg.Model.Name)
 			}
 			// Set defaults, if any.
-			if arg.defaultValue != "" {
-				if err := arg.value.Set(arg.defaultValue); err != nil {
+			if arg.Model.Default != "" {
+				if err := arg.value.Set(arg.Model.Default); err != nil {
 					return err
 				}
 			}
@@ -348,7 +358,7 @@ func (a *Application) setValues(context *ParseContext) (selected []string, err e
 					return
 				}
 			}
-			selected = append(selected, clause.name)
+			selected = append(selected, clause.Model.Name)
 			lastCmd = clause
 		}
 	}
@@ -410,7 +420,7 @@ func (a *Application) applyActions(context *ParseContext) error {
 
 // Errorf prints an error message to w in the format "<appname>: error: <message>".
 func (a *Application) Errorf(w io.Writer, format string, args ...interface{}) {
-	fmt.Fprintf(w, a.Name+": error: "+format+"\n", args...)
+	fmt.Fprintf(w, a.Model.Name+": error: "+format+"\n", args...)
 }
 
 // Fatalf writes a formatted error to w then terminates with exit status 1.
@@ -431,7 +441,7 @@ func (a *Application) UsageErrorf(w io.Writer, format string, args ...interface{
 // information for the given ParseContext, before exiting.
 func (a *Application) UsageErrorContextf(w io.Writer, context *ParseContext, format string, args ...interface{}) {
 	a.Errorf(w, format, args...)
-	a.usageForContext(w, context)
+	a.UsageTemplate(context, os.Stdout, 2, UsageTemplate)
 	a.terminate(1)
 }
 

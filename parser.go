@@ -61,14 +61,32 @@ type ParseElement struct {
 // *ArgClause and *CmdClause values and their corresponding arguments (if
 // any).
 type ParseContext struct {
-	SelectedCommand string
-	argsOnly        bool
-	peek            []*Token
-	args            []string
-	flags           *flagGroup
-	arguments       *argGroup
+	argsOnly  bool
+	peek      []*Token
+	args      []string
+	flags     *flagGroup
+	arguments *argGroup
 	// Flags, arguments and commands encountered and collected during parse.
 	Elements []*ParseElement
+
+	// Selected command (if any).
+	SelectedCommand *CmdModel
+}
+
+func (p *ParseContext) Flags() *FlagGroupModel {
+	f := &FlagGroupModel{}
+	for _, flag := range p.flags.flagOrder {
+		f.Flags = append(f.Flags, flag.Model)
+	}
+	return f
+}
+
+func (p *ParseContext) Args() *ArgGroupModel {
+	a := &ArgGroupModel{}
+	for _, arg := range p.arguments.args {
+		a.Args = append(a.Args, arg.Model)
+	}
+	return a
 }
 
 // HasTrailingArgs returns true if there are unparsed command-line arguments.
@@ -87,10 +105,10 @@ func tokenize(args []string) *ParseContext {
 
 func (p *ParseContext) mergeFlags(flags *flagGroup) {
 	for _, flag := range flags.flagOrder {
-		if flag.shorthand != 0 {
-			p.flags.short[string(flag.shorthand)] = flag
+		if flag.Model.Short != 0 {
+			p.flags.short[string(flag.Model.Short)] = flag
 		}
-		p.flags.long[flag.name] = flag
+		p.flags.long[flag.Model.Name] = flag
 		p.flags.flagOrder = append(p.flags.flagOrder, flag)
 	}
 }
@@ -183,10 +201,6 @@ func (p *ParseContext) pop() *Token {
 	token := p.peek[end]
 	p.peek = p.peek[0:end]
 	return token
-}
-
-func (p *ParseContext) String() string {
-	return p.SelectedCommand
 }
 
 func (p *ParseContext) matchedFlag(flag *FlagClause, value string) {

@@ -10,12 +10,14 @@ type cmdGroup struct {
 	parent       *CmdClause
 	commands     map[string]*CmdClause
 	commandOrder []*CmdClause
+	model        *CmdGroupModel
 }
 
 func newCmdGroup(app *Application) *cmdGroup {
 	return &cmdGroup{
 		app:      app,
 		commands: make(map[string]*CmdClause),
+		model:    &CmdGroupModel{},
 	}
 }
 
@@ -33,16 +35,17 @@ func (c *cmdGroup) addCommand(name, help string) *CmdClause {
 	cmd := newCommand(c.app, name, help)
 	c.commands[name] = cmd
 	c.commandOrder = append(c.commandOrder, cmd)
+	c.model.Commands = append(c.model.Commands, cmd.Model)
 	return cmd
 }
 
 func (c *cmdGroup) init() error {
 	seen := map[string]bool{}
 	for _, cmd := range c.commandOrder {
-		if seen[cmd.name] {
-			return fmt.Errorf("duplicate command '%s'", cmd.name)
+		if seen[cmd.Model.Name] {
+			return fmt.Errorf("duplicate command '%s'", cmd.Model.Name)
 		}
-		seen[cmd.name] = true
+		seen[cmd.Model.Name] = true
 		if err := cmd.init(); err != nil {
 			return err
 		}
@@ -64,7 +67,7 @@ func (c *cmdGroup) parse(context *ParseContext) (selected []string, _ error) {
 		return nil, fmt.Errorf("no such command '%s'", token)
 	}
 	context.Next()
-	context.SelectedCommand = cmd.name
+	context.SelectedCommand = cmd.Model
 	selected, err := cmd.parse(context)
 	if err == nil {
 		selected = append([]string{token.String()}, selected...)
@@ -85,8 +88,7 @@ type CmdClause struct {
 	*argGroup
 	*cmdGroup
 	app       *Application
-	name      string
-	help      string
+	Model     *CmdModel
 	dispatch  Action
 	validator CmdClauseValidator
 }
@@ -96,10 +98,16 @@ func newCommand(app *Application, name, help string) *CmdClause {
 		flagGroup: newFlagGroup(),
 		argGroup:  newArgGroup(),
 		cmdGroup:  newCmdGroup(app),
-		app:       app,
-		name:      name,
-		help:      help,
+		Model: &CmdModel{
+			Name: name,
+			Help: help,
+		},
+		app: app,
 	}
+	c.Model.FlagGroupModel = c.flagGroup.model
+	c.Model.ArgGroupModel = c.argGroup.model
+	c.Model.CmdGroupModel = c.cmdGroup.model
+	c.Model.cmd = c
 	return c
 }
 
@@ -110,9 +118,9 @@ func (c *CmdClause) Validate(validator CmdClauseValidator) *CmdClause {
 }
 
 func (c *CmdClause) FullCommand() string {
-	out := []string{c.name}
+	out := []string{c.Model.Name}
 	for p := c.parent; p != nil; p = p.parent {
-		out = append([]string{p.name}, out...)
+		out = append([]string{p.Model.Name}, out...)
 	}
 	return strings.Join(out, " ")
 }

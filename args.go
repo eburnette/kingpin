@@ -3,11 +3,14 @@ package kingpin
 import "fmt"
 
 type argGroup struct {
-	args []*ArgClause
+	args  []*ArgClause
+	model *ArgGroupModel
 }
 
 func newArgGroup() *argGroup {
-	return &argGroup{}
+	return &argGroup{
+		model: &ArgGroupModel{},
+	}
 }
 
 func (a *argGroup) have() bool {
@@ -17,6 +20,8 @@ func (a *argGroup) have() bool {
 func (a *argGroup) Arg(name, help string) *ArgClause {
 	arg := newArg(name, help)
 	a.args = append(a.args, arg)
+	a.model.Args = append(a.model.Args, arg.Model)
+	arg.Model.arg = arg
 	return arg
 }
 
@@ -28,8 +33,8 @@ func (a *argGroup) parse(context *ParseContext) error {
 		arg := a.args[i]
 		token := context.Peek()
 		if token.Type == TokenEOL {
-			if consumed == 0 && arg.required {
-				return fmt.Errorf("'%s' is required", arg.name)
+			if consumed == 0 && arg.Model.Required {
+				return fmt.Errorf("'%s' is required", arg.Model.Name)
 			}
 			break
 		}
@@ -42,7 +47,7 @@ func (a *argGroup) parse(context *ParseContext) error {
 
 		if arg.consumesRemainder() {
 			if last == context.Peek() {
-				return fmt.Errorf("expected positional arguments <%s>", arg.name)
+				return fmt.Errorf("expected positional arguments <%s>", arg.Model.Name)
 			}
 			consumed++
 		} else {
@@ -54,9 +59,9 @@ func (a *argGroup) parse(context *ParseContext) error {
 	// Set defaults for all remaining args.
 	for i < len(a.args) {
 		arg := a.args[i]
-		if arg.defaultValue != "" {
-			if err := arg.value.Set(arg.defaultValue); err != nil {
-				return fmt.Errorf("invalid default value '%s' for argument '%s'", arg.defaultValue, arg.name)
+		if arg.Model.Default != "" {
+			if err := arg.value.Set(arg.Model.Default); err != nil {
+				return fmt.Errorf("invalid default value '%s' for argument '%s'", arg.Model.Default, arg.Model.Name)
 			}
 		}
 		i++
@@ -70,19 +75,19 @@ func (a *argGroup) init() error {
 	previousArgMustBeLast := false
 	for i, arg := range a.args {
 		if previousArgMustBeLast {
-			return fmt.Errorf("Args() can't be followed by another argument '%s'", arg.name)
+			return fmt.Errorf("Args() can't be followed by another argument '%s'", arg.Model.Name)
 		}
 		if arg.consumesRemainder() {
 			previousArgMustBeLast = true
 		}
-		if _, ok := seen[arg.name]; ok {
-			return fmt.Errorf("duplicate argument '%s'", arg.name)
+		if _, ok := seen[arg.Model.Name]; ok {
+			return fmt.Errorf("duplicate argument '%s'", arg.Model.Name)
 		}
-		seen[arg.name] = struct{}{}
-		if arg.required && required != i {
+		seen[arg.Model.Name] = struct{}{}
+		if arg.Model.Required && required != i {
 			return fmt.Errorf("required arguments found after non-required")
 		}
-		if arg.required {
+		if arg.Model.Required {
 			required++
 		}
 		if err := arg.init(); err != nil {
@@ -94,17 +99,16 @@ func (a *argGroup) init() error {
 
 type ArgClause struct {
 	parserMixin
-	name         string
-	help         string
-	defaultValue string
-	required     bool
-	dispatch     Action
+	Model    *ArgModel
+	dispatch Action
 }
 
 func newArg(name, help string) *ArgClause {
 	a := &ArgClause{
-		name: name,
-		help: help,
+		Model: &ArgModel{
+			Name: name,
+			Help: help,
+		},
 	}
 	return a
 }
@@ -118,13 +122,13 @@ func (a *ArgClause) consumesRemainder() bool {
 
 // Required arguments must be input by the user. They can not have a Default() value provided.
 func (a *ArgClause) Required() *ArgClause {
-	a.required = true
+	a.Model.Required = true
 	return a
 }
 
 // Default value for this argument. It *must* be parseable by the value of the argument.
 func (a *ArgClause) Default(value string) *ArgClause {
-	a.defaultValue = value
+	a.Model.Default = value
 	return a
 }
 
@@ -134,11 +138,11 @@ func (a *ArgClause) Action(dispatch Action) *ArgClause {
 }
 
 func (a *ArgClause) init() error {
-	if a.required && a.defaultValue != "" {
-		return fmt.Errorf("required argument '%s' with unusable default value", a.name)
+	if a.Model.Required && a.Model.Default != "" {
+		return fmt.Errorf("required argument '%s' with unusable default value", a.Model.Name)
 	}
 	if a.value == nil {
-		return fmt.Errorf("no parser defined for arg '%s'", a.name)
+		return fmt.Errorf("no parser defined for arg '%s'", a.Model.Name)
 	}
 	return nil
 }
@@ -146,7 +150,7 @@ func (a *ArgClause) init() error {
 func (a *ArgClause) parse(context *ParseContext) error {
 	token := context.Peek()
 	if token.Type != TokenArg {
-		return fmt.Errorf("expected positional argument <%s>", a.name)
+		return fmt.Errorf("expected positional argument <%s>", a.Model.Name)
 	}
 	context.matchedArg(a, token.Value)
 	context.Next()

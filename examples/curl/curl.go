@@ -93,12 +93,12 @@ func applyPOST() error {
 }
 
 func main() {
-	kingpin.CommandLine.Help = "An example implementation of curl."
+	kingpin.CommandLine.Help("An example implementation of curl.")
 	switch kingpin.Parse() {
-	case "get url":
+	case getURL.FullCommand():
 		kingpin.FatalIfError(apply("GET", (*getURLURL).String()), "GET failed")
 
-	case "post":
+	case post.FullCommand():
 		kingpin.FatalIfError(applyPOST(), "POST failed")
 	}
 }

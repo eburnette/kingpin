@@ -10,12 +10,14 @@ type flagGroup struct {
 	short     map[string]*FlagClause
 	long      map[string]*FlagClause
 	flagOrder []*FlagClause
+	model     *FlagGroupModel
 }
 
 func newFlagGroup() *flagGroup {
 	return &flagGroup{
 		short: make(map[string]*FlagClause),
 		long:  make(map[string]*FlagClause),
+		model: &FlagGroupModel{},
 	}
 }
 
@@ -24,6 +26,8 @@ func (f *flagGroup) Flag(name, help string) *FlagClause {
 	flag := newFlag(name, help)
 	f.long[name] = flag
 	f.flagOrder = append(f.flagOrder, flag)
+	f.model.Flags = append(f.model.Flags, flag.Model)
+	flag.Model.flag = flag
 	return flag
 }
 
@@ -32,8 +36,8 @@ func (f *flagGroup) init() error {
 		if err := flag.init(); err != nil {
 			return err
 		}
-		if flag.shorthand != 0 {
-			f.short[string(flag.shorthand)] = flag
+		if flag.Model.Short != 0 {
+			f.short[string(flag.Model.Short)] = flag
 		}
 	}
 	return nil
@@ -106,7 +110,7 @@ loop:
 func (f *flagGroup) visibleFlags() int {
 	count := 0
 	for _, flag := range f.long {
-		if !flag.hidden {
+		if !flag.Model.Hidden {
 			count++
 		}
 	}
@@ -116,51 +120,34 @@ func (f *flagGroup) visibleFlags() int {
 // FlagClause is a fluid interface used to build flags.
 type FlagClause struct {
 	parserMixin
-	name         string
-	shorthand    byte
-	help         string
-	envar        string
-	defaultValue string
-	placeholder  string
-	dispatch     Action
-	hidden       bool
+	Model    *FlagModel
+	dispatch Action
 }
 
 func newFlag(name, help string) *FlagClause {
 	f := &FlagClause{
-		name: name,
-		help: help,
+		Model: &FlagModel{
+			Name: name,
+			Help: help,
+		},
 	}
 	return f
 }
 
 func (f *FlagClause) needsValue() bool {
-	return f.required && f.defaultValue == ""
-}
-
-func (f *FlagClause) formatPlaceHolder() string {
-	if f.placeholder != "" {
-		return f.placeholder
-	}
-	if f.defaultValue != "" {
-		if _, ok := f.value.(*stringValue); ok {
-			return fmt.Sprintf("%q", f.defaultValue)
-		}
-		return f.defaultValue
-	}
-	return strings.ToUpper(f.name)
+	return f.Model.Required && f.Model.Default == ""
 }
 
 func (f *FlagClause) init() error {
-	if f.required && f.defaultValue != "" {
-		return fmt.Errorf("required flag '--%s' with default value that will never be used", f.name)
+	if f.Model.Required && f.Model.Default != "" {
+		return fmt.Errorf("required flag '--%s' with default value that will never be used", f.Model.Name)
 	}
 	if f.value == nil {
-		return fmt.Errorf("no type defined for --%s (eg. .String())", f.name)
+		return fmt.Errorf("no type defined for --%s (eg. .String())", f.Model.Name)
 	}
-	if f.envar != "" {
-		if v := os.Getenv(f.envar); v != "" {
-			f.defaultValue = v
+	if f.Model.Envar != "" {
+		if v := os.Getenv(f.Model.Envar); v != "" {
+			f.Model.Default = v
 		}
 	}
 	return nil
@@ -174,14 +161,14 @@ func (f *FlagClause) Action(dispatch Action) *FlagClause {
 
 // Default value for this flag. It *must* be parseable by the value of the flag.
 func (f *FlagClause) Default(value string) *FlagClause {
-	f.defaultValue = value
+	f.Model.Default = value
 	return f
 }
 
 // OverrideDefaultFromEnvar overrides the default value for a flag from an
 // environment variable, if available.
 func (f *FlagClause) OverrideDefaultFromEnvar(envar string) *FlagClause {
-	f.envar = envar
+	f.Model.Envar = envar
 	return f
 }
 
@@ -189,25 +176,25 @@ func (f *FlagClause) OverrideDefaultFromEnvar(envar string) *FlagClause {
 // default behaviour is to use the value provided by Default() if provided,
 // then fall back on the capitalized flag name.
 func (f *FlagClause) PlaceHolder(placeholder string) *FlagClause {
-	f.placeholder = placeholder
+	f.Model.PlaceHolder = placeholder
 	return f
 }
 
 // Hidden hides a flag from usage but still allows it to be used.
 func (f *FlagClause) Hidden() *FlagClause {
-	f.hidden = true
+	f.Model.Hidden = true
 	return f
 }
 
-// Required makes the flag required. You can not provide a Default() value to a Required() flag.
+// Required enforces the constraint that this flag must be populated by the user. You can not provide a Default() value to a Required() flag.
 func (f *FlagClause) Required() *FlagClause {
-	f.required = true
+	f.Model.Required = true
 	return f
 }
 
 // Short sets the short flag name.
-func (f *FlagClause) Short(name byte) *FlagClause {
-	f.shorthand = name
+func (f *FlagClause) Short(name rune) *FlagClause {
+	f.Model.Short = name
 	return f
 }
 
